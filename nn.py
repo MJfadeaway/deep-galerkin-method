@@ -4,7 +4,7 @@ import tensorflow as tf
 import os
 
 # Author: Kejun Tang
-# Last revised  Nov 26, 2018
+# Last Revised: Nov 27, 2018
 
 class FC_net():
 	"""FC_net for two dimensional steady state diffusion problems"""
@@ -46,7 +46,7 @@ class FC_net():
 		saver = tf.train.Saver()
 		with tf.Session() as sess:
 			sess.run(tf.global_variables_initializer())
-			for idx_iter in range(num_iters):
+			for idx_iter in range(self.num_iters):
 				batch_data = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 2)
 				loss_cur, _ = sess.run([variational_loss, train_op],
 												feed_dict={z: batch_data})
@@ -75,7 +75,7 @@ class FC_resnet():
 		self.num_hidden = num_hidden
 		self.num_blocks = num_blocks
 		self.batch_size = batch_size
-		self.iters = num_iters
+		self.num_iters = num_iters
 		self.lr_rate = lr_rate
 		self.lr_decay = lr_decay
 		self.output_path = output_path
@@ -92,8 +92,7 @@ class FC_resnet():
 
 
 	def fcresnet(self, x_input):
-		num_hidden = self.num_hidden
-		num_layers = self.num_layers
+		num_blocks = self.num_blocks
 		response = x_input
 		for idx_block in range(self.num_blocks):
 			with tf.variable_scope("unit_%d" % idx_block, reuse=tf.AUTO_REUSE):
@@ -119,7 +118,7 @@ class FC_resnet():
 		saver = tf.train.Saver()
 		with tf.Session() as sess:
 			sess.run(tf.global_variables_initializer())
-			for idx_iter in range(num_iters):
+			for idx_iter in range(self.num_iters):
 				batch_data = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 2)
 				loss_cur, _ = sess.run([variational_loss, train_op],
 												feed_dict={z: batch_data})
@@ -136,7 +135,7 @@ class FC_resnet():
 		with tf.Session() as sess:
 			sess.run(tf.global_variables_initializer())
 			saver.restore(sess, chkpt_fname_final)
-			u_test = sess.run(self.fcnet(test_input))
+			u_test = sess.run(self.fcresnet(test_input))
 
 		return u_test
 
