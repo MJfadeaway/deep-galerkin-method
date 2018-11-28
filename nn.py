@@ -57,7 +57,7 @@ class VarNets():
 			with tf.variable_scope("unit_%d" % idx_block, reuse=tf.AUTO_REUSE):
 				response = self.residual_block(response)
 
-		with tf.variable_scope("output"):
+		with tf.variable_scope("output", reuse=tf.AUTO_REUSE):
 			response = tf.layers.dense(response, 1)
 		return response
 
@@ -67,9 +67,12 @@ class VarNets():
 		z = tf.placeholder(tf.float32, shape=[None, 2]) # two dimensional (the number of spatial variables) PDE
 
 		if self.net_type == 'FC':
-			u = ((z[:,0])**2 - 1) * ((z[:,1])**2 - 1) * self.fcnet(z) # assign boundary condition to neural networks
+			# assign boundary condition to neural networks
+			u = ((tf.reshape(z[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(z[:,1], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * self.fcnet(z) 
+#			print('-----shape netoutput-----', self.fcnet(z).shape)
+#			print('-----shape u-----', u.shape)
 		elif self.net_type == 'Res':
-			u = ((z[:,0])**2 - 1) * ((z[:,1])**2 - 1) * self.fcresnet(z)
+			u = ((tf.reshape(z[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(z[:,1], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * self.fcresnet(z)
 		else:
 			raise ValueError("net_type is not supported")
 
@@ -115,6 +118,7 @@ class VarNets():
 				u_test = sess.run(self.fcresnet(test_input))
 			else:
 				raise ValueError("net_type is not supported")
-			u_test = sess.run(((test_input[:,0])**2 - 1) * ((test_input[:,1])**2 - 1)) * u_test
+			print('----shape u_test-----',u_test.shape)
+			u_test = sess.run(((tf.reshape(test_input[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(test_input[:,1], [-1,1]))**2 - tf.convert_to_tensor(1., tf.float32))) * u_test
 		return u_test, self.pde_type
 
