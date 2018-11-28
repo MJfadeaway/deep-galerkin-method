@@ -110,11 +110,11 @@ class VarNets():
 			sess.run(tf.global_variables_initializer())
 			saver.restore(sess, chkpt_fname_final)
 			if self.net_type == 'FC':
-				u_test = ((test_input[:,0])**2 - 1) * ((test_input[:,1])**2 - 1) * sess.run(self.fcnet(test_input))
+				u_test = sess.run(self.fcnet(test_input))
 			elif self.net_type == 'Res':
-				u_test = ((test_input[:,0])**2 - 1) * ((test_input[:,1])**2 - 1) * sess.run(self.fcresnet(test_input))
+				u_test = sess.run(self.fcresnet(test_input))
 			else:
 				raise ValueError("net_type is not supported")
-
+			u_test = sess.run(((test_input[:,0])**2 - 1) * ((test_input[:,1])**2 - 1)) * u_test
 		return u_test, self.pde_type
 
