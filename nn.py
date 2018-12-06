@@ -5,13 +5,27 @@ import os
 import shutil
 
 # Author: Kejun Tang
-# Last Revised: Dec 04, 2018
+# Last Revised: Dec 06, 2018
 
 class VarNets():
 	"""VarNets for two dimensional PDEs"""
 
 	"""
-	
+	variational principle for solving PDEs, including Diffusion equation, Helmholtz equation, and Stokes equation
+
+	Parameters:
+	-----------
+	spatial_range: spatial domain (square domain), [-1,1] or [0,1], list
+	pde_type: which PDE, Diffusion, Helmholtz or Stokes, string
+	net_type: which networks, fully connected (FC) or residual nets (Res), string
+	num_hidden: hidden units in each layer, int
+	num_blocks: the number of residual blocks for residual nets, int
+	batch_size: batch size, int
+	num_iters: the number of iterations, int
+	lr_rate: step size (learning rate) for stochastic optimization, float
+	lr_decay: decay of step size (learning rate) after each 10000 iterations, float
+	output_path: save path for tensorflow model, string
+	output_shape: if Stokes, output_shape is 2, and output_shape 1 otherwise, int
 	"""
 
 	def __init__(self, spatial_range, pde_type, net_type, num_hidden=256, num_blocks=10, batch_size=200, num_iters=100000, lr_rate=1e-3, lr_decay=1.0, output_path='VarNets'):
@@ -34,6 +48,7 @@ class VarNets():
 			self.variational_loss_history = []
 
 	def fcnet(self, x_input):
+		"""fcnet for all pde_type"""
 		num_hidden = self.num_hidden
 		with tf.variable_scope("fcnet", reuse=tf.AUTO_REUSE):
 				h1 = tf.nn.relu(tf.layers.dense(x_input, num_hidden))
@@ -105,6 +120,11 @@ class VarNets():
 		"""train step"""
 
 		z = tf.placeholder(tf.float32, shape=[None, 2]) # two dimensional (the number of spatial variables) PDE
+		zbc_top = tf.placeholder(tf.float32, shape=[None, 2]) # for top boundary
+		zbc_bottom = tf.placeholder(tf.float32, shape=[None, 2]) # for bottom boundary
+		zbc_left = tf.placeholder(tf.float32, shape=[None, 2]) # for left boundary
+		zbc_right = tf.placeholder(tf.float32, shape=[None, 2]) # for right boundary
+
 		if self.pde_type != 'Stokes':
 			if self.net_type == 'FC':
 				# assign boundary condition to neural networks
@@ -118,10 +138,22 @@ class VarNets():
 			slopes = tf.reduce_sum(tf.square(gradients), reduction_indices=[1])
 		else: # Stokes equation
 			if self.net_type == 'FC':
-				velocity = ((tf.reshape(z[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(z[:,1], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * self.fcnet(z)
+				velocity = self.fcnet(z)
+				# for velocity boundary penalty
+				velocity_top = self.fcnet(zbc_top)
+				velocity_bottom = self.fcnet(zbc_bottom)
+				velocity_left = self.fcnet(zbc_left)
+				velocity_right = self.fcnet(zbc_right)
+
 				pressure = self.fcnet_pressure(z)
 			elif self.net_type == 'Res':
-				velocity = ((tf.reshape(z[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(z[:,1], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * self.velocity_net(z)
+				velocity = self.velocity_net(z)
+				# for velocity boundary penalty
+				velocity_top = self.velocity_net(zbc_top)
+				velocity_bottom = self.velocity_net(zbc_bottom)
+				velocity_left = self.velocity_net(zbc_left)
+				velocity_right = self.velocity_net(zbc_right)
+
 				pressure = self.pressure_net(z)
 			else:
 				raise ValueError("net_type is not supported")
@@ -141,6 +173,16 @@ class VarNets():
 			# construct variational loss for saddle point, Stokes equation
 			velocity_varloss = tf.reduce_mean(0.5*(v1_slopes+v2_slopes)) - tf.reduce_mean(pressure*div_velocity) # minimize velocity
 			pressure_varloss = tf.reduce_mean(pressure*div_velocity) # maximum pressure
+
+			# boundary penalty loss term, here is driven leaky cavity flow, u=[1,0]^T on the top line x2 = 1, and u = [0,0]^T on 
+			# all other boundaries, where x = [x1, x2]^T and the spatial domain D = (0,1) * (0,1)
+			top_loss = tf.reduce_mean(tf.square(velocity_top-tf.convert_to_tensor([[1., 0.]], tf.float32)))
+			bottom_loss = tf.reduce_mean(tf.square(velocity_bottom-tf.convert_to_tensor([[0., 0.]], tf.float32)))
+			left_loss = tf.reduce_mean(tf.square(velocity_left-tf.convert_to_tensor([[0., 0.]], tf.float32)))
+			right_loss = tf.reduce_mean(tf.square(velocity_right-tf.convert_to_tensor([[0., 0.]], tf.float32)))
+			boundary_loss = top_loss + bottom_loss + left_loss + right_loss
+
+			velocity_varloss += boundary_loss
 
 			# extract training variables
 			if self.net_type == 'FC':
@@ -184,8 +226,25 @@ class VarNets():
 			else: # Stokes equation
 				for idx_iter in range(self.num_iters):
 					batch_data = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 2)
+					# batch_data for boundary
+					top_x = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 1)
+					top_y = self.spatial_range[1] * np.ones((self.batch_size,1))
+					batch_data_top = np.concatenate((top_x, top_y), axis=1)
+
+					bottom_x = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 1)
+					bottom_y = self.spatial_range[0] * np.ones((self.batch_size,1))
+					batch_data_bottom = np.concatenate((bottom_x, bottom_y), axis=1)
+
+					left_x = self.spatial_range[0] * np.ones((self.batch_size,1))
+					left_y = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 1)
+					batch_data_left = np.concatenate((left_x, left_y), axis=1)
+
+					right_x = self.spatial_range[1] * np.ones((self.batch_size,1))
+					right_y = self.spatial_range[0] + (self.spatial_range[1]-self.spatial_range[0])*np.random.rand(self.batch_size, 1)
+					batch_data_right = np.concatenate((right_x, right_y), axis=1)
+
 					velocity_loss_cur, _ = sess.run([velocity_varloss, velocity_train_op],
-													feed_dict={z: batch_data})
+													feed_dict={z: batch_data, zbc_top: batch_data_top, zbc_bottom: batch_data_bottom, zbc_left: batch_data_left, zbc_right: batch_data_right})
 					pressure_loss_cur, _ = sess.run([pressure_varloss, pressure_train_op],
 													feed_dict={z: batch_data})
 					self.velocity_varloss_history.append(velocity_loss_cur)
@@ -199,11 +258,11 @@ class VarNets():
 	def test(self, test_input):
 		chkpt_fname_final = tf.train.latest_checkpoint(self.output_path)
 		saver = tf.train.Saver()
-		assert test_input.shape[1] == 2
 		with tf.Session() as sess:
 			sess.run(tf.global_variables_initializer())
 			saver.restore(sess, chkpt_fname_final)
 			if self.pde_type != 'Stokes':
+				assert test_input.shape[1] == 2
 				if self.net_type == 'FC':
 					u_test = sess.run(self.fcnet(test_input))
 				elif self.net_type == 'Res':
@@ -213,17 +272,18 @@ class VarNets():
 				u_test = sess.run(((tf.reshape(test_input[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(test_input[:,1], [-1,1]))**2 - tf.convert_to_tensor(1., tf.float32))) * u_test
 
 			else: # Stokes equation
+				test_inputv, test_inputp = test_input[0], test_input[1]
+				assert test_inputv.shape[1] == 2 and test_inputp.shape[1] == 2
 				if self.net_type == 'FC':
-					u_test = sess.run(self.fcnet(test_input))
-					p_test = sess.run(self.fcnet_pressure(test_input))
+					u_test = sess.run(self.fcnet(test_inputv))
+					p_test = sess.run(self.fcnet_pressure(test_inputp))
 				elif self.net_type == 'Res':
-					u_test = sess.run(self.velocity_net(test_input))
-					p_test = sess.run(self.pressure_net(test_input))
+					u_test = sess.run(self.velocity_net(test_inputv))
+					p_test = sess.run(self.pressure_net(test_inputp))
 				else:
 					raise ValueError("net_type is not supported")
-				u_test = sess.run(((tf.reshape(test_input[:,0], [-1, 1]))**2 - tf.convert_to_tensor(1., tf.float32)) * ((tf.reshape(test_input[:,1], [-1,1]))**2 - tf.convert_to_tensor(1., tf.float32))) * u_test
 				u_test = np.reshape(u_test, (-1,1), order='F')
-				u_test = np.concatenate((u_test, p_test), 0)
+				u_test = np.concatenate((u_test, p_test), axis=0)
 
 		return u_test, self.pde_type
 
