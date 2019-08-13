@@ -3,7 +3,7 @@ solve partial differential equations using deep learning algorithm
 
 
 
-# Requirement
+# Requirements
 Python
 
 Numpy
